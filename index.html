@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>海上列车 · 水平线</title>
+<style>
+  :root{
+    --ink: rgba(238, 245, 247, .92);
+    --ink-dim: rgba(214, 228, 234, .5);
+    --line: rgba(220, 236, 240, .22);
+  }
+  html, body { margin:0; height:100%; overflow:hidden; background:#04070d; }
+  body {
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    cursor: default;
+  }
+  canvas { display:block; width:100vw; height:100vh; }
+
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; }
+
+  .brand {
+    position:absolute; top:36px; left:40px; font-weight:300;
+    text-shadow:0 1px 10px rgba(0,0,0,.5);
+  }
+  .brand .cn { font-size:13px; letter-spacing:.62em; margin-left:-.1em; }
+  .brand .bar { width:54px; height:1px; background:var(--line); margin:13px 0 10px; }
+  .brand .en { font-size:8.5px; letter-spacing:.4em; color:var(--ink-dim); }
+
+  .clockbox {
+    position:absolute; top:36px; right:40px; text-align:right; font-weight:300;
+    text-shadow:0 1px 10px rgba(0,0,0,.45);
+  }
+  .clockbox #time {
+    font-size:25px; letter-spacing:.12em; font-variant-numeric:tabular-nums;
+  }
+  .clockbox #phase {
+    display:block; margin-top:6px; font-size:9.5px; letter-spacing:.42em;
+    color:var(--ink-dim);
+  }
+
+  #subtitle {
+    position:absolute; left:50%; bottom:74px; transform:translate(-50%, 10px);
+    min-width:300px; padding:14px 38px 15px; text-align:center;
+    border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    background:linear-gradient(90deg, rgba(4,10,16,0), rgba(4,10,16,.4), rgba(4,10,16,0));
+    opacity:0; transition:opacity .7s ease, transform .9s ease;
+    font-size:13px; letter-spacing:.3em; white-space:nowrap;
+    text-shadow:0 1px 12px rgba(0,0,0,.6);
+  }
+  #subtitle.show { opacity:1; transform:translate(-50%, 0); }
+  #subtitle .en {
+    display:block; margin-top:7px; font-size:8.5px; letter-spacing:.36em;
+    color:var(--ink-dim);
+  }
+
+  #hint {
+    position:absolute; right:40px; bottom:34px;
+    font-size:9px; letter-spacing:.26em; color:rgba(214,228,234,.36);
+    text-shadow:0 1px 8px rgba(0,0,0,.5);
+  }
+
+  #veil {
+    position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+    background:#04070d; transition:opacity 1.4s ease; 
+  }
+  #veil.gone { opacity:0; pointer-events:none; }
+  .v-inner { text-align:center; }
+  .v-title { font-size:17px; letter-spacing:.9em; margin-left:.9em; font-weight:300; color:#e8f0f2; }
+  .v-bar { width:180px; height:1px; margin:22px auto 18px; background:rgba(220,236,240,.14); overflow:hidden; }
+  .v-bar i { display:block; width:40%; height:100%; background:rgba(220,236,240,.65); animation:sweep 1.7s ease-in-out infinite; }
+  @keyframes sweep { 0%{transform:translateX(-110%)} 100%{transform:translateX(360%)} }
+  .v-sub { font-size:8.5px; letter-spacing:.34em; color:rgba(214,228,234,.42); }
+
+  #err {
+    position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center;
+    background:#04070d; color:#cfdfdf; font-size:13px; line-height:2; letter-spacing:.1em; padding:40px; text-align:center;
+  }
+
+
+  /* ---------- Esc 暂停设置 ---------- */
+  #settings {
+    position: fixed; inset: 0; z-index: 70;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(3, 7, 12, .52);
+    backdrop-filter: blur(9px);
+    opacity: 0; pointer-events: none;
+    transition: opacity .24s ease;
+  }
+  #settings.open { opacity: 1; pointer-events: auto; }
+
+  .settings-panel {
+    width: min(440px, calc(100vw - 48px));
+    padding: 26px 28px 18px;
+    background: rgba(8, 15, 21, .94);
+    border: 1px solid rgba(210, 230, 236, .2);
+    box-shadow: 0 24px 90px rgba(0, 0, 0, .55);
+    color: var(--ink);
+  }
+  .settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+  .settings-cn { font-size: 12px; letter-spacing: .62em; margin-left: -.1em; }
+  .settings-en { margin-top: 8px; font-size: 8px; letter-spacing: .34em; color: var(--ink-dim); }
+  #settings-close {
+    width: 30px; height: 30px; padding: 0; line-height: 26px;
+    background: transparent; border: 1px solid var(--line); color: var(--ink);
+    font-size: 18px; font-weight: 300; cursor: pointer;
+  }
+  #settings-close:hover { background: rgba(255,255,255,.06); }
+
+  .settings-rows { margin-top: 22px; border-top: 1px solid var(--line); }
+  .setting-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    min-height: 46px; border-bottom: 1px solid rgba(210,230,236,.1);
+    font-size: 10px; letter-spacing: .22em; color: var(--ink-dim);
+  }
+  .setting-row select {
+    width: 128px; padding: 6px 9px;
+    background: rgba(255,255,255,.045);
+    border: 1px solid rgba(210,230,236,.22);
+    color: var(--ink); font: inherit; font-size: 9px; letter-spacing: .12em;
+    outline: none; cursor: pointer;
+  }
+  .setting-row select option { background: #0a1117; color: #e6f0f2; }
+  .settings-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 16px; font-size: 8px; letter-spacing: .28em; color: rgba(214,228,234,.36);
+  }
+  #set-fps-read { color: rgba(214,228,234,.62); }
+
+  @media (max-width: 720px) {
+    .brand { top:22px; left:22px; }
+    .brand .cn { font-size:11px; letter-spacing:.42em; }
+    .clockbox { top:22px; right:22px; }
+    .clockbox #time { font-size:18px; }
+    #hint { display:none; }
+    #subtitle { bottom:44px; font-size:11px; padding:11px 22px 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="brand">
+    <div class="cn">海 上 列 車</div>
+    <div class="bar"></div>
+    <div class="en">SEA RAILWAY — SHIOMI LINE</div>
+  </div>
+  <div class="clockbox">
+    <div id="time">--:--</div>
+    <div id="phase">夜</div>
+  </div>
+  <div id="subtitle"></div>
+  <div id="hint">Esc · 设置　T · 时间流速　鼠标 · 视角</div>
+</div>
+
+<div id="veil">
+  <div class="v-inner">
+    <div class="v-title">水 平 线</div>
+    <div class="v-bar"><i></i></div>
+    <div class="v-sub">正在铺设海面 · NOW LOADING</div>
+  </div>
+</div>
+
+
+<div id="settings" aria-hidden="true">
+  <div class="settings-panel">
+    <div class="settings-head">
+      <div>
+        <div class="settings-cn">设 置</div>
+        <div class="settings-en">SETTINGS · PAUSED</div>
+      </div>
+      <button id="settings-close" aria-label="继续运行">×</button>
+    </div>
+    <div class="settings-rows">
+      <label class="setting-row"><span>帧率上限</span>
+        <select id="set-fps">
+          <option value="30">30 FPS</option>
+          <option value="60">60 FPS</option>
+          <option value="120">120 FPS</option>
+          <option value="0">无限制</option>
+        </select>
+      </label>
+      <label class="setting-row"><span>渲染分辨率</span>
+        <select id="set-scale">
+          <option value="0.5">50%</option>
+          <option value="0.75">75%</option>
+          <option value="1">100%</option>
+        </select>
+      </label>
+      <label class="setting-row"><span>阴影质量</span>
+        <select id="set-shadows">
+          <option value="off">关闭</option>
+          <option value="low">低</option>
+          <option value="mid">中</option>
+          <option value="high">高</option>
+        </select>
+      </label>
+      <label class="setting-row"><span>泛光</span>
+        <select id="set-bloom">
+          <option value="on">开启</option>
+          <option value="off">关闭</option>
+        </select>
+      </label>
+      <label class="setting-row"><span>水面反射</span>
+        <select id="set-reflection">
+          <option value="on">开启</option>
+          <option value="off">关闭</option>
+        </select>
+      </label>
+    </div>
+    <div class="settings-foot"><span id="set-fps-read">-- FPS</span><span>ESC 继续运行</span></div>
+  </div>
+</div>
+
+<div id="err">
+  <div>
+    这台机器的浏览器没能打开 WebGL2。<br>
+    换个 Chrome / Edge 再试一次吧。
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
