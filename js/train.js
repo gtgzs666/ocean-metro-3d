@@ -143,7 +143,75 @@ function makePlateTexture(renderer) {
   return tex;
 }
 
-/* 圆角矩形，用于风挡和车身截面 */
+/* 前灯眩光：柔光核 + 一道很淡的横向拉丝 */
+function makeHeadlightGlareTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 256);
+
+  const radial = g.createRadialGradient(128, 128, 2, 128, 128, 128);
+  radial.addColorStop(0.0, 'rgba(255,255,248,1)');
+  radial.addColorStop(0.08, 'rgba(255,250,224,0.98)');
+  radial.addColorStop(0.22, 'rgba(255,232,176,0.46)');
+  radial.addColorStop(0.55, 'rgba(255,208,136,0.12)');
+  radial.addColorStop(1.0, 'rgba(255,194,116,0)');
+  g.fillStyle = radial;
+  g.fillRect(0, 0, 256, 256);
+
+  g.globalCompositeOperation = 'lighter';
+  const streak = g.createLinearGradient(0, 128, 256, 128);
+  streak.addColorStop(0.0, 'rgba(255,230,180,0)');
+  streak.addColorStop(0.35, 'rgba(255,244,210,0.3)');
+  streak.addColorStop(0.5, 'rgba(255,252,236,0.8)');
+  streak.addColorStop(0.65, 'rgba(255,244,210,0.3)');
+  streak.addColorStop(1.0, 'rgba(255,230,180,0)');
+  g.fillStyle = streak;
+  g.fillRect(0, 126, 256, 4);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/* 水面灯光倒影：上亮下暗的模糊拉长光斑，带横向波纹缺口 */
+function makeHeadlightReflectionTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 128, 256);
+
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.0, 'rgba(255,246,220,0.95)');
+  grad.addColorStop(0.18, 'rgba(255,232,188,0.6)');
+  grad.addColorStop(0.5, 'rgba(255,216,164,0.22)');
+  grad.addColorStop(0.8, 'rgba(255,202,142,0.06)');
+  grad.addColorStop(1.0, 'rgba(255,196,132,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 256);
+
+  g.globalCompositeOperation = 'destination-out';
+  for (let y = 10; y < 256; y += 22) {
+    g.fillStyle = 'rgba(0,0,0,0.24)';
+    g.fillRect(0, y, 128, 3);
+  }
+
+  g.globalCompositeOperation = 'destination-in';
+  const side = g.createLinearGradient(0, 0, 128, 0);
+  side.addColorStop(0.0, 'rgba(0,0,0,0)');
+  side.addColorStop(0.32, 'rgba(255,255,255,0.8)');
+  side.addColorStop(0.5, 'rgba(255,255,255,1)');
+  side.addColorStop(0.68, 'rgba(255,255,255,0.8)');
+  side.addColorStop(1.0, 'rgba(0,0,0,0)');
+  g.fillStyle = side;
+  g.fillRect(0, 0, 128, 256);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function roundedRectShape(w, h, r) {
   const s = new THREE.Shape();
   const x = -w / 2;
@@ -200,10 +268,9 @@ export function createTrain(renderer) {
   const lampOffColor = new THREE.Color(0x1b2428);
   let headlightsOn = null;
   let headLight = null;
-  let headlightBeams = null;
-  let headlightBeamMat = null;
-  const headlightWaterHits = [new THREE.Vector3(), new THREE.Vector3()];
-  const _hitLocal = new THREE.Vector3();
+  let headlightGlows = null;
+  let headlightGlareMat = null;
+  let headlightReflectionMat = null;
 
   /* 车头细节 */
   const destTex = makeDestinationTexture(renderer);
@@ -503,82 +570,49 @@ export function createTrain(renderer) {
         car.add(lens);
       }
 
-      /* --- 夜间前灯：两道淡的扇形光束 ---
-         多层扇形微微上仰，离开水面；水面倒影由平面反射相机生成，和车窗倒影同一套反射。 */
-      const beamLen = 38;
-      const beamWidth = 2.4;
-      const beamGeo = new THREE.PlaneGeometry(beamLen, beamWidth, 1, 1);
-      beamGeo.translate(beamLen / 2, 0, 0); // 灯口在 x=0，远端在 x=beamLen；竖直光面
-      const beamGeoH = beamGeo.clone();
-      beamGeoH.rotateX(-Math.PI / 2);       // 水平光面，保留第一版扇形并负责水面倒影
+      /* --- 夜间前灯：两团眩光 + 水面两道模糊倒影 --- */
+      const glareTex = makeHeadlightGlareTexture();
+      const reflectionTex = makeHeadlightReflectionTexture();
 
-      headlightBeamMat = new THREE.ShaderMaterial({
-        uniforms: {
-          uTime: { value: 0 },
-          uColor: { value: new THREE.Color(0xffe2b8) },
-          uIntensity: { value: 0.38 },
-        },
-        vertexShader: /* glsl */`
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            vec4 wp = modelMatrix * vec4(position, 1.0);
-            gl_Position = projectionMatrix * viewMatrix * wp;
-          }
-        `,
-        fragmentShader: /* glsl */`
-          precision highp float;
-          uniform vec3 uColor;
-          uniform float uTime;
-          uniform float uIntensity;
-          varying vec2 vUv;
-
-          void main() {
-            float along = vUv.x;
-            float across = abs(vUv.y - 0.5) * 2.0;
-
-            float nearFade = smoothstep(0.0, 0.05, along);
-            float farFade = 1.0 - smoothstep(0.55, 1.0, along);
-
-            /* 从灯口向外张开的扇形边缘 */
-            float halfW = mix(0.12, 0.92, pow(along, 0.8));
-            float edge = 1.0 - smoothstep(halfW * 0.35, halfW, across);
-            float body = 0.52 + 0.48 * (0.5 + 0.5 * sin(along * 7.0 + across * 8.0 - uTime * 1.1));
-            float grain = 0.86 + 0.14 * sin(along * 29.0 + across * 13.0 + uTime * 0.55);
-            float core = exp(-pow((vUv.y - 0.5) / mix(0.018, 0.10, along), 2.0))
-                       * (1.0 - smoothstep(0.45, 0.9, along)) * 0.03;
-
-            float a = uIntensity * nearFade * farFade * (edge * body * grain + core);
-            gl_FragColor = vec4(uColor, a);
-          }
-        `,
+      headlightGlareMat = new THREE.SpriteMaterial({
+        map: glareTex,
+        color: 0xfff2d8,
         transparent: true,
+        opacity: 0.66,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        depthTest: true,
+        depthTest: false,
+      });
+
+      headlightReflectionMat = new THREE.MeshBasicMaterial({
+        map: reflectionTex,
+        color: 0xffe2b8,
+        transparent: true,
+        opacity: 0.28,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
         side: THREE.DoubleSide,
       });
 
-      headlightBeams = new THREE.Group();
-      headlightBeams.position.set(frontX + 0.04, 2.16, 0);
-      headlightBeams.rotation.z = -0.16;  // 光束向下压，照到前方水面
-      headlightBeams.visible = false;
-      for (const z of [-1.1, 1.1]) {
-        const vertical = new THREE.Mesh(beamGeo, headlightBeamMat);
-        vertical.position.z = z;
-        vertical.rotation.set(0, -Math.sign(z) * 0.035, 0.02);
-        vertical.renderOrder = 3;
-        vertical.frustumCulled = false;
-        headlightBeams.add(vertical);
+      const reflectionGeo = new THREE.PlaneGeometry(2.2, 4.4);
+      reflectionGeo.rotateX(-Math.PI / 2);
 
-        const horizontal = new THREE.Mesh(beamGeoH, headlightBeamMat);
-        horizontal.position.z = z;
-        horizontal.rotation.set(0, -Math.sign(z) * 0.035, 0.02);
-        horizontal.renderOrder = 3;
-        horizontal.frustumCulled = false;
-        headlightBeams.add(horizontal);
+      headlightGlows = new THREE.Group();
+      headlightGlows.visible = false;
+      for (const z of [-1.1, 1.1]) {
+        const glare = new THREE.Sprite(headlightGlareMat);
+        glare.position.set(frontX + 0.18, 2.16, z);
+        glare.scale.set(2.0, 1.35, 1);
+        glare.renderOrder = 6;
+        headlightGlows.add(glare);
+
+        const reflection = new THREE.Mesh(reflectionGeo, headlightReflectionMat);
+        reflection.position.set(frontX + 1.2, 0.07, z * 1.15);
+        reflection.renderOrder = 4;
+        headlightGlows.add(reflection);
       }
-      car.add(headlightBeams);
+      car.add(headlightGlows);
 
       for (const z of [-0.78, 0.78]) {
         const tail = new THREE.Mesh(new THREE.CircleGeometry(0.05, 16), matTailDim);
@@ -689,7 +723,7 @@ export function createTrain(renderer) {
 
     matLamp.color.copy(on ? lampOnColor : lampOffColor);
     if (headLight) headLight.intensity = on ? 9 : 0;
-    if (headlightBeams) headlightBeams.visible = on;
+    if (headlightGlows) headlightGlows.visible = on;
   }
 
   function update(dt, elapsed, speed) {
@@ -702,17 +736,13 @@ export function createTrain(renderer) {
       w.rotation.z -= (speed / 0.55) * dt;
     }
 
-    if (headlightBeams && headlightBeamMat) {
-      headlightBeamMat.uniforms.uTime.value = elapsed;
-      headlightBeams.updateWorldMatrix(true, false);
-      const t = 2.16 / Math.sin(0.16); // 与光束下压角一致，求中心线落到水面的位置
-      for (let i = 0; i < 2; i++) {
-        _hitLocal.set(t, 0, i === 0 ? -1.1 : 1.1);
-        headlightBeams.localToWorld(_hitLocal);
-        headlightWaterHits[i].copy(_hitLocal);
-      }
+    if (headlightGlareMat) {
+      headlightGlareMat.opacity = 0.68 + 0.08 * Math.sin(elapsed * 2.1);
+    }
+    if (headlightReflectionMat) {
+      headlightReflectionMat.opacity = 0.26 + 0.04 * Math.sin(elapsed * 1.4 + 1.7);
     }
   }
 
-  return { group, wheels, windowMats, update, setHeadlights, headlightWaterHits };
+  return { group, wheels, windowMats, update, setHeadlights };
 }

@@ -536,7 +536,6 @@ function animate() {
   const headlightsOn = virtualHour >= 18 || virtualHour < 6;
   train.setHeadlights(headlightsOn);
   train.update(dt, elapsed, SPEED);
-  water.setHeadlightHits(train.headlightWaterHits, headlightsOn);
   spray.update(dt, palette.night);
   props.update(dt);
   stationSystem.update(dt, onStationEvent);

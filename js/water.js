@@ -57,10 +57,6 @@ uniform vec3  uHorizon;
 uniform float uTime;
 uniform float uNight;
 uniform float uReflectivity;
-uniform vec2  uLampHitA;
-uniform vec2  uLampHitB;
-uniform float uLampOn;
-uniform vec3  uLampColor;
 
 varying vec3  vWorldPos;
 varying vec3  vNormalW;
@@ -90,15 +86,6 @@ float fbm(vec2 p) {
     a *= 0.5;
   }
   return v;
-}
-
-/* 车灯中心线落在水面的光斑：只做落点，不画整片扇形 */
-float lampPool(vec2 p, vec2 hit) {
-  vec2 d = p - hit;
-  float r = length(vec2(d.x / 3.8, d.y / 1.5));
-  float pool = exp(-r * r * 2.1);
-  float ripple = 0.72 + 0.28 * sin(length(d) * 7.5 - uTime * 3.0 + d.x * 0.35);
-  return pool * ripple;
 }
 
 void main() {
@@ -182,10 +169,6 @@ void main() {
   float crest = smoothstep(0.62, 0.95, vH) * smoothstep(0.55, 0.85, fbm(p * 1.4 + uTime * 0.25));
   col = mix(col, foamCol * 0.85, crest * 0.16);
 
-  /* ---------- 车灯落在水面的光斑 ---------- */
-  float lampHits = lampPool(p, uLampHitA) + lampPool(p, uLampHitB);
-  col += uLampColor * lampHits * uLampOn * 0.5;
-
   /* ---------- 雾 ---------- */
   float fog = 1.0 - exp(-pow(dist * 0.0008, 2.0));
   col = mix(col, uFogColor, clamp(fog, 0.0, 0.985));
@@ -230,10 +213,6 @@ export function createWater(renderer, scene, camera) {
     uHorizon: { value: palette.hor },
     uNight: { value: 0 },
     uReflectivity: { value: 1 },
-    uLampHitA: { value: new THREE.Vector2() },
-    uLampHitB: { value: new THREE.Vector2() },
-    uLampOn: { value: 0 },
-    uLampColor: { value: new THREE.Color(0xffe2b8) },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -353,12 +332,6 @@ export function createWater(renderer, scene, camera) {
     uniforms.uReflectivity.value = on ? 1 : 0;
   }
 
-  function setHeadlightHits(hits, on) {
-    if (hits && hits[0]) uniforms.uLampHitA.value.set(hits[0].x, hits[0].z);
-    if (hits && hits[1]) uniforms.uLampHitB.value.set(hits[1].x, hits[1].z);
-    uniforms.uLampOn.value = on ? 1 : 0;
-  }
-
   function resize() {
     const s = renderer.getDrawingBufferSize(new THREE.Vector2());
     uniforms.uResolution.value.copy(s);
@@ -368,5 +341,5 @@ export function createWater(renderer, scene, camera) {
     );
   }
 
-  return { mesh, material, uniforms, update, renderReflection, resize, setReflectionEnabled, setHeadlightHits, rt };
+  return { mesh, material, uniforms, update, renderReflection, resize, setReflectionEnabled, rt };
 }
