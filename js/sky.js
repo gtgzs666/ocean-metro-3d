@@ -60,28 +60,27 @@ float fbm(vec2 p) {
 void main() {
   vec3 dir = normalize(vDir);
   float h = clamp(dir.y, 0.0, 1.0);
-  float clearSky = 1.0 - clamp(uCloudBoost, 0.0, 1.0) * 0.82;
 
   /* 基础天空渐变 */
   vec3 col = mix(uHorizon, uZenith, pow(h, 0.36));
 
   /* 太阳方向的大范围散射 */
   float sunDot = clamp(dot(dir, uSunDir), 0.0, 1.0);
-  col += uSunColor * pow(sunDot, 5.0) * 0.26 * (1.0 - uNight * 0.85) * clearSky;
-  col += uSunColor * pow(sunDot, 90.0) * 0.55 * clearSky;
+  col += uSunColor * pow(sunDot, 5.0) * 0.26 * (1.0 - uNight * 0.85);
+  col += uSunColor * pow(sunDot, 90.0) * 0.55;
 
   /* 日轮 */
   float sunDisc = smoothstep(0.99955, 0.99982, sunDot);
-  sunDisc *= step(0.0, uSunDir.y + 0.015) * clearSky;
+  sunDisc *= step(0.0, uSunDir.y + 0.015);
   col += uSunColor * sunDisc * 2.6;
-  col += uSunColor * pow(sunDot, 260.0) * 0.3 * clearSky;
+  col += uSunColor * pow(sunDot, 260.0) * 0.3;
 
   /* 月轮与月晕 */
   float moonDot = clamp(dot(dir, uMoonDir), 0.0, 1.0);
   float moonDisc = smoothstep(0.99970, 0.99988, moonDot);
-  moonDisc *= step(0.0, uMoonDir.y + 0.02) * clearSky;
+  moonDisc *= step(0.0, uMoonDir.y + 0.02);
   col += vec3(0.78, 0.86, 1.0) * moonDisc * 4.2 * uNight;
-  col += vec3(0.48, 0.62, 0.92) * pow(moonDot, 160.0) * 0.5 * uNight * clearSky;
+  col += vec3(0.48, 0.62, 0.92) * pow(moonDot, 160.0) * 0.5 * uNight;
 
   /* 星空 */
   if (uNight > 0.015) {
@@ -89,7 +88,7 @@ void main() {
     float st = hash31(floor(sp));
     float tw = 0.55 + 0.45 * sin(uTime * 2.3 + st * 61.0);
     float star = smoothstep(0.9968, 0.9994, st) * smoothstep(0.0, 0.16, dir.y);
-    float starFade = smoothstep(0.86, 1.0, uNight) * clearSky;
+    float starFade = smoothstep(0.86, 1.0, uNight);
     col += vec3(0.83, 0.9, 1.0) * star * tw * 2.2 * starFade;
   }
 
@@ -109,6 +108,13 @@ void main() {
   cloudCol = mix(cloudCol, uCloudColor * 0.45, uNight * 0.8);
   cloudCol = mix(cloudCol, uCloudColor * 0.5, uCloudBoost * 0.5);
   col = mix(col, cloudCol, cover * band * (0.48 + uCloudBoost * 0.32));
+
+  /* 云层之后再叠一层淡化的日月光晕；云厚时只留一点透光 */
+  float lightFade = 0.36 + 0.64 * (1.0 - clamp(uCloudBoost, 0.0, 1.0));
+  float sunHalo = pow(sunDot, 9.0) * 0.07 + pow(sunDot, 90.0) * 0.12;
+  float moonHalo = pow(moonDot, 16.0) * 0.11;
+  col += uSunColor * sunHalo * lightFade * (1.0 - uNight * 0.72);
+  col += vec3(0.62, 0.76, 1.0) * moonHalo * lightFade * uNight;
 
   /* 雾霾和闪电 */
   vec3 hazeCol = mix(uHorizon, uCloudColor, 0.5);
@@ -181,47 +187,70 @@ function makeCloudTexture() {
 function createCloudLayer() {
   const group = new THREE.Group();
   const tex = makeCloudTexture();
-  const defs = [
-    { x: -8200, y: 1000, z: -12400, sx: 5200, sy: 1850, o: 0.68, r: 0.03 },
-    { x: -3500, y: 1550, z: -13100, sx: 3500, sy: 1300, o: 0.58, r: -0.05 },
-    { x: 900,   y: 980,  z: -11900, sx: 3200, sy: 1150, o: 0.68,  r: 0.02 },
-    { x: 3200,  y: 1250, z: -11200, sx: 6200, sy: 2300, o: 0.8,  r: 0.01 },
-    { x: 5400,  y: 1750, z: -13300, sx: 4600, sy: 1600, o: 0.64, r: 0.06 },
-    { x: 9600,  y: 1150, z: -12600, sx: 3600, sy: 1300, o: 0.62, r: -0.03 },
-    { x: 1200,  y: 2250, z: -13800, sx: 5200, sy: 1700, o: 0.4, r: 0.04 },
+
+  /* 多团重叠的积云：每团由若干前后/上下错开的 billboard 组成，
+     靠透明叠积和暗部做出体积，而不是一张平贴片。 */
+  const clusters = [
+    { x: -9200, y: 1280, z: -13200, sx: 3800, sy: 950, n: 7 },
+    { x: -5600, y: 1620, z: -12800, sx: 3000, sy: 850, n: 6 },
+    { x: -2400, y: 1160, z: -13600, sx: 3500, sy: 900, n: 7 },
+    { x: 1000,  y: 1480, z: -12600, sx: 3600, sy: 850, n: 7 },
+    { x: 4400,  y: 1200, z: -13400, sx: 3800, sy: 950, n: 7 },
+    { x: 7900,  y: 1660, z: -12900, sx: 3000, sy: 800, n: 6 },
+    { x: 11200, y: 1160, z: -13700, sx: 3200, sy: 850, n: 5 },
+    { x: -11600, y: 1500, z: -13000, sx: 3000, sy: 800, n: 5 },
   ];
 
-  const mats = [];
-  for (const d of defs) {
-    const m = new THREE.SpriteMaterial({
-      map: tex,
-      transparent: true,
-      opacity: d.o,
-      depthWrite: false,
-      fog: false,
-      toneMapped: true,
-      alphaTest: 0.06,
-    });
-    m.rotation = d.r;
-    m.userData.baseOpacity = d.o;
-    const sp = new THREE.Sprite(m);
-    sp.position.set(d.x, d.y, d.z);
-    sp.scale.set(d.sx, d.sy, 1);
-    group.add(sp);
-    mats.push(m);
+  const puffs = [];
+  for (const c of clusters) {
+    for (let i = 0; i < c.n; i++) {
+      const baseSX = 900 + Math.random() * 1900;
+      const baseSY = baseSX * (0.34 + Math.random() * 0.24);
+      const baseX = c.x + (Math.random() * 2 - 1) * c.sx;
+      const baseY = c.y + (Math.random() * 2 - 1) * c.sy;
+      const z = c.z + (Math.random() * 2 - 1) * 950;
+      const baseO = 0.16 + Math.random() * 0.3;
+
+      const m = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        opacity: baseO,
+        depthWrite: false,
+        fog: false,
+        toneMapped: true,
+        alphaTest: 0.06,
+      });
+      m.rotation = (Math.random() * 2 - 1) * 0.12;
+
+      const sp = new THREE.Sprite(m);
+      sp.position.set(baseX, baseY, z);
+      sp.scale.set(baseSX, baseSY, 1);
+      group.add(sp);
+
+      puffs.push({
+        sprite: sp,
+        mat: m,
+        baseX,
+        baseY,
+        baseSY,
+        baseO,
+        coverage: Math.random(),
+        shade: 0.68 + Math.random() * 0.32,
+      });
+    }
   }
 
-  return { group, mats };
+  return { group, puffs };
 }
 
 const _cloudTint = new THREE.Color();
 const _cloudNight = new THREE.Color(0x141c2e);
 const _cloudGray = new THREE.Color(0x59636b);
-function updateCloudTint(mats, sunDir, night, overcast) {
+function updateCloudTint(puffs, sunDir, night, overcast) {
   _cloudTint.copy(palette.cloud).lerp(palette.sun, 0.32).multiplyScalar(1.18);
   _cloudTint.lerp(_cloudNight, night * 0.55);
   _cloudTint.lerp(_cloudGray, Math.min(1, overcast * 0.38));
-  for (const m of mats) m.color.copy(_cloudTint);
+  for (const p of puffs) p.mat.color.copy(_cloudTint).multiplyScalar(p.shade);
 }
 
 export function createSky(renderer) {
@@ -298,9 +327,15 @@ export function createSky(renderer) {
     uniforms.uHaze.value = haze;
     weatherOvercast = Math.min(1, overcast * 0.9 + rain * 0.5 + haze * 0.4);
 
-    for (const m of cloudLayer.mats) {
-      const base = m.userData.baseOpacity || 0.6;
-      m.opacity = Math.min(1, base * (0.3 + cloud * 1.05));
+    const coverage = Math.min(1, 0.18 + cloud * 0.95 + overcast * 0.15);
+    const thickness = 1 + overcast * 0.55 + rain * 0.55 + haze * 0.15;
+    const opacityMul = 0.55 + cloud * 0.55 + overcast * 0.15;
+
+    for (const p of cloudLayer.puffs) {
+      p.sprite.visible = p.coverage <= coverage;
+      p.sprite.scale.y = p.baseSY * thickness;
+      p.sprite.position.y = p.baseY - p.baseSY * (thickness - 1) * 0.35;
+      p.mat.opacity = Math.min(0.98, p.baseO * opacityMul);
     }
   }
 
@@ -313,7 +348,7 @@ export function createSky(renderer) {
     uniforms.uSunDir.value.copy(sunDir);
     uniforms.uMoonDir.value.copy(moonDir);
     uniforms.uNight.value = night;
-    updateCloudTint(cloudLayer.mats, sunDir, night, weatherOvercast);
+    updateCloudTint(cloudLayer.puffs, sunDir, night, weatherOvercast);
   }
 
   return { mesh, group, material: mat, uniforms, update, setWeather, setFlash, refreshEnv };
