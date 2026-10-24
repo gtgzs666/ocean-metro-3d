@@ -57,6 +57,7 @@ uniform vec3  uHorizon;
 uniform float uTime;
 uniform float uNight;
 uniform float uReflectivity;
+uniform float uWeatherReflect;
 
 varying vec3  vWorldPos;
 varying vec3  vNormalW;
@@ -132,6 +133,11 @@ void main() {
   refl += texture2D(uReflection, clamp(ruv + vec2(blur * 0.85, -blur * 0.55), vec2(0.002), vec2(0.998))).rgb * 0.12;
   refl += texture2D(uReflection, clamp(ruv - vec2(blur * 0.85, -blur * 0.55), vec2(0.002), vec2(0.998))).rgb * 0.12;
 
+  /* 去掉太阳/月亮方向的镜面反光，避免被列车挡住一半的日月倒影 */
+  vec3 R = reflect(-V, N);
+  float sunMask = smoothstep(0.9970, 0.9996, dot(R, normalize(uLightDir)));
+  refl *= 1.0 - sunMask * 0.96;
+
   /* 反射统一压一点饱和度，避免太“镜子” */
   float lum = dot(refl, vec3(0.299, 0.587, 0.114));
   refl = mix(vec3(lum), refl, 1.05);
@@ -143,15 +149,8 @@ void main() {
   base *= 0.9 + 0.1 * uNight;
   base *= 1.08;
 
-  vec3 col = mix(base, refl, clamp(0.035 + fres * 0.6, 0.0, 0.72) * uReflectivity);
+  vec3 col = mix(base, refl, clamp(0.035 + fres * 0.6, 0.0, 0.72) * uReflectivity * uWeatherReflect);
 
-  /* ---------- 阳光 / 月光碎金 ---------- */
-  vec3 L = normalize(uLightDir);
-  vec3 Hv = normalize(L + V);
-  float ndh = max(dot(N, Hv), 0.0);
-  float sparkle = pow(ndh, 1500.0) * 10.0 + pow(ndh, 180.0) * 0.35 + pow(ndh, 24.0) * 0.05;
-  sparkle *= 0.35 + 1.8 * smoothstep(0.32, 0.78, fbm(p * 2.3 + vec2(uTime * 0.7, -uTime * 0.4)));
-  col += uLightColor * sparkle * (1.0 - uNight * 0.65);
 
   /* ---------- 车尾的白色尾流 ---------- */
   float zLine = 2.35 + max(0.0, -p.x) * 0.055;
@@ -213,6 +212,7 @@ export function createWater(renderer, scene, camera) {
     uHorizon: { value: palette.hor },
     uNight: { value: 0 },
     uReflectivity: { value: 1 },
+    uWeatherReflect: { value: 1 },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -332,6 +332,10 @@ export function createWater(renderer, scene, camera) {
     uniforms.uReflectivity.value = on ? 1 : 0;
   }
 
+  function setWeatherReflection(v) {
+    uniforms.uWeatherReflect.value = Math.min(1, Math.max(0, v));
+  }
+
   function resize() {
     const s = renderer.getDrawingBufferSize(new THREE.Vector2());
     uniforms.uResolution.value.copy(s);
@@ -341,5 +345,5 @@ export function createWater(renderer, scene, camera) {
     );
   }
 
-  return { mesh, material, uniforms, update, renderReflection, resize, setReflectionEnabled, rt };
+  return { mesh, material, uniforms, update, renderReflection, resize, setReflectionEnabled, setWeatherReflection, rt };
 }

@@ -569,6 +569,7 @@ function animate() {
   sky.setFlash(ws.flash);
   sky.update(elapsed, sunDir, moonDir, palette.night);
   water.update(dt, elapsed, lightDir, palette.night);
+  water.setWeatherReflection(clamp(1 - ws.cloud * 0.68 - ws.rain * 0.22, 0.22, 1));
 
   for (const m of train.windowMats) {
     m.emissiveIntensity = 0.62 + palette.night * 1.3;
