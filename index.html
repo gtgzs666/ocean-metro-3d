@@ -40,6 +40,10 @@
     display:block; margin-top:6px; font-size:9.5px; letter-spacing:.42em;
     color:var(--ink-dim);
   }
+  .clockbox #weather {
+    display:block; margin-top:7px; font-size:8.5px; letter-spacing:.24em;
+    color:rgba(214,228,234,.42); white-space:nowrap;
+  }
 
   #subtitle {
     position:absolute; left:50%; bottom:74px; transform:translate(-50%, 10px);
@@ -149,6 +153,7 @@
   <div class="clockbox">
     <div id="time">--:--</div>
     <div id="phase">夜</div>
+    <div id="weather">新加坡 · 天气加载中</div>
   </div>
   <div id="subtitle"></div>
   <div id="hint">Esc · 设置　T · 时间流速　鼠标 · 视角</div>
@@ -204,6 +209,12 @@
       </label>
       <label class="setting-row"><span>水面反射</span>
         <select id="set-reflection">
+          <option value="on">开启</option>
+          <option value="off">关闭</option>
+        </select>
+      </label>
+      <label class="setting-row"><span>天气音效</span>
+        <select id="set-sound">
           <option value="on">开启</option>
           <option value="off">关闭</option>
         </select>

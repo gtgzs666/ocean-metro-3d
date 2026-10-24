@@ -212,6 +212,91 @@ function makeHeadlightReflectionTexture() {
   return tex;
 }
 
+/* 驾驶舱内饰：暖色顶灯、仪表台、司机剪影，和其他车厢的窗光呼应 */
+function makeCabInteriorTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 512, 256);
+
+  g.fillStyle = '#22170f';
+  g.fillRect(0, 0, 512, 256);
+
+  const glow = g.createRadialGradient(256, 118, 8, 256, 118, 245);
+  glow.addColorStop(0.0, 'rgba(255,222,170,0.9)');
+  glow.addColorStop(0.35, 'rgba(198,137,76,0.45)');
+  glow.addColorStop(0.75, 'rgba(80,48,26,0.16)');
+  glow.addColorStop(1.0, 'rgba(20,13,8,0)');
+  g.fillStyle = glow;
+  g.fillRect(0, 0, 512, 256);
+
+  /* 顶部灯带 */
+  g.fillStyle = 'rgba(255,238,196,0.95)';
+  g.fillRect(92, 17, 328, 8);
+  g.fillStyle = 'rgba(255,214,150,0.24)';
+  g.fillRect(84, 25, 344, 5);
+
+  /* 侧立柱 */
+  g.fillStyle = '#0b0806';
+  g.fillRect(0, 0, 30, 256);
+  g.fillRect(482, 0, 30, 256);
+
+  /* 仪表台 */
+  g.fillStyle = '#090807';
+  g.beginPath();
+  g.moveTo(0, 198);
+  g.quadraticCurveTo(256, 154, 512, 198);
+  g.lineTo(512, 256);
+  g.lineTo(0, 256);
+  g.closePath();
+  g.fill();
+
+  /* 仪表台反光 */
+  g.strokeStyle = 'rgba(255,188,116,0.24)';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(42, 210);
+  g.quadraticCurveTo(256, 172, 470, 210);
+  g.stroke();
+
+  /* 司机剪影 */
+  g.fillStyle = '#0a0908';
+  g.beginPath();
+  g.ellipse(166, 127, 25, 30, 0, 0, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.moveTo(122, 205);
+  g.quadraticCurveTo(126, 155, 166, 153);
+  g.quadraticCurveTo(208, 155, 216, 205);
+  g.closePath();
+  g.fill();
+
+  /* 右侧副驾驶座/控制台剪影 */
+  g.fillStyle = 'rgba(8,7,6,0.9)';
+  g.beginPath();
+  g.ellipse(372, 142, 22, 27, 0, 0, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.moveTo(334, 204);
+  g.quadraticCurveTo(340, 165, 372, 164);
+  g.quadraticCurveTo(406, 165, 412, 204);
+  g.closePath();
+  g.fill();
+
+  /* 几粒控制灯 */
+  g.fillStyle = 'rgba(255,196,104,0.85)';
+  g.fillRect(286, 195, 12, 3);
+  g.fillRect(304, 195, 7, 3);
+  g.fillStyle = 'rgba(130,208,190,0.75)';
+  g.fillRect(318, 195, 5, 3);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 function roundedRectShape(w, h, r) {
   const s = new THREE.Shape();
   const x = -w / 2;
@@ -538,6 +623,25 @@ export function createTrain(renderer) {
       windshield.position.set(frontX + 0.02, 3.07, 0);
       car.add(windshield);
 
+      /* 驾驶舱暖光：前风挡内侧的灯带、仪表台和司机剪影 */
+      const cabInteriorTex = makeCabInteriorTexture();
+      const matCabInterior = toon({
+        map: cabInteriorTex,
+        emissive: 0xffffff,
+        emissiveMap: cabInteriorTex,
+        emissiveIntensity: 1.05,
+      });
+      windowMats.push(matCabInterior);
+
+      const cabInterior = new THREE.Mesh(new THREE.PlaneGeometry(2.82, 0.76), matCabInterior);
+      cabInterior.rotation.y = Math.PI / 2;
+      cabInterior.position.set(frontX + 0.032, 3.07, 0);
+      car.add(cabInterior);
+
+      const cabLight = new THREE.PointLight(0xffd0a0, 0.9, 9, 2.0);
+      cabLight.position.set(8.3, 3.05, 0);
+      car.add(cabLight);
+
       const glassGlint = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.1, 2.35), matGlowStrip);
       glassGlint.position.set(frontX + 0.03, 3.25, 0.16);
       glassGlint.rotation.x = 0.15;
@@ -671,6 +775,11 @@ export function createTrain(renderer) {
         sideGlass.position.set(8.55, 3.05, zf + side * 0.004);
         if (side < 0) sideGlass.rotation.y = Math.PI;
         car.add(sideGlass);
+
+        const sideGlow = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 0.7), matCabInterior);
+        sideGlow.position.set(8.55, 3.05, zf + side * 0.007);
+        if (side < 0) sideGlow.rotation.y = Math.PI;
+        car.add(sideGlow);
 
         const divider = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 0.025), matBody);
         divider.position.set(8.9, 3.05, zf + side * 0.008);

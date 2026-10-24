@@ -17,6 +17,7 @@ import { createProps } from './props.js';
 import { createScenerySystem } from './scenery.js';
 import { createCatenary } from './catenary.js';
 import { createSpray } from './spray.js';
+import { createWeather } from './weather.js';
 
 /* ============================================================
    基础环境
@@ -84,6 +85,7 @@ const props = createProps(scene);
 const scenery = createScenerySystem(scene);
 const catenary = createCatenary(scene);
 const spray = createSpray(scene);
+const weather = createWeather(scene, camera);
 
 /* ============================================================
    灯光
@@ -204,6 +206,7 @@ composer.addPass(new OutputPass());
    ============================================================ */
 const timeEl = document.getElementById('time');
 const phaseEl = document.getElementById('phase');
+const weatherEl = document.getElementById('weather');
 const subEl = document.getElementById('subtitle');
 const hintEl = document.getElementById('hint');
 const veil = document.getElementById('veil');
@@ -230,6 +233,18 @@ function updateClock(elev, hour) {
   else if (elev > 0.02) phase = hh < 12 ? '黎明' : '黄昏';
   else if (elev > -0.12) phase = hh < 12 ? '拂晓' : '薄暮';
   phaseEl.textContent = phase;
+}
+
+let lastWeatherText = '';
+function updateWeatherHud() {
+  const w = weather.state;
+  const temp = Number.isFinite(w.temp) ? Math.round(w.temp) + '°C' : '';
+  const label = w.loaded ? w.label : (w.error ? '天气暂缺' : '天气加载中');
+  const text = '新加坡 · ' + label + (temp ? ' ' + temp : '');
+  if (text !== lastWeatherText) {
+    lastWeatherText = text;
+    weatherEl.textContent = text;
+  }
 }
 
 window.addEventListener('keydown', (e) => {
@@ -271,6 +286,8 @@ const clock = new THREE.Clock();
 const sunDir = new THREE.Vector3();
 const moonDir = new THREE.Vector3();
 const lightDir = new THREE.Vector3();
+const _weatherFog = new THREE.Color();
+const _weatherHazeColor = new THREE.Color(0x87939a);
 
 /* ------------------------------------------------------------
    构图：车头停在画面 2/3 处，车身向左侧画外延伸（不露车尾）
@@ -326,7 +343,7 @@ window.addEventListener('resize', resize);
    Esc 暂停 + 画面设置
    ============================================================ */
 const SETTINGS_KEY = 'sea-metro-settings-v1';
-const DEFAULT_SETTINGS = { fps: 60, scale: 1, shadows: 'high', bloom: true, reflection: true };
+const DEFAULT_SETTINGS = { fps: 60, scale: 1, shadows: 'high', bloom: true, reflection: true, sound: true };
 let settings = { ...DEFAULT_SETTINGS };
 
 try {
@@ -339,6 +356,7 @@ settings.scale = [0.5, 0.75, 1].includes(Number(settings.scale)) ? Number(settin
 if (!['off', 'low', 'mid', 'high'].includes(settings.shadows)) settings.shadows = 'high';
 settings.bloom = settings.bloom !== false;
 settings.reflection = settings.reflection !== false;
+settings.sound = settings.sound !== false;
 
 let renderScale = settings.scale;
 let fpsLimit = settings.fps;
@@ -354,6 +372,7 @@ const optScale = document.getElementById('set-scale');
 const optShadows = document.getElementById('set-shadows');
 const optBloom = document.getElementById('set-bloom');
 const optReflection = document.getElementById('set-reflection');
+const optSound = document.getElementById('set-sound');
 const fpsRead = document.getElementById('set-fps-read');
 
 function saveSettings() {
@@ -393,6 +412,7 @@ function syncSettingsUi() {
   optShadows.value = settings.shadows;
   optBloom.value = settings.bloom ? 'on' : 'off';
   optReflection.value = settings.reflection ? 'on' : 'off';
+  optSound.value = settings.sound ? 'on' : 'off';
 }
 
 function applySettings() {
@@ -402,6 +422,7 @@ function applySettings() {
   applyShadows();
   applyBloom();
   applyReflection();
+  weather.setSoundEnabled(settings.sound);
   syncSettingsUi();
 }
 
@@ -469,6 +490,12 @@ optReflection.addEventListener('change', () => {
   renderPausedFrame();
 });
 
+optSound.addEventListener('change', () => {
+  settings.sound = optSound.value === 'on';
+  saveSettings();
+  weather.setSoundEnabled(settings.sound);
+});
+
 function animate() {
   requestAnimationFrame(animate);
 
@@ -523,10 +550,23 @@ function animate() {
   fillLight.color.copy(palette.hor).lerp(new THREE.Color(0xffffff), 0.3);
   fillLight.intensity = 0.08 + (1 - palette.night) * 0.3;
 
-  scene.fog.color.copy(palette.fog);
-  renderer.setClearColor(palette.fog, 1);
+  /* --- 新加坡实时天气：压暗光照、压能见度、雾霾色 --- */
+  const ws = weather.state;
+  weather.update(dt, elapsed);
+  const weatherDim = clamp(1 - ws.overcast * 0.42 - ws.rain * 0.35 - ws.haze * 0.22, 0.22, 1);
+  sunLight.intensity *= weatherDim;
+  hemi.intensity *= 0.72 + 0.28 * weatherDim;
+  fillLight.intensity *= weatherDim;
+
+  const vis = clamp(ws.visibility || 10000, 250, 30000);
+  scene.fog.density = clamp((3.0 / vis) * (1 + ws.rain * 0.55 + ws.haze * 0.8), 0.00028, 0.014);
+  _weatherFog.copy(palette.fog).lerp(_weatherHazeColor, clamp(ws.haze * 0.4 + ws.overcast * 0.18, 0, 0.62));
+  scene.fog.color.copy(_weatherFog);
+  renderer.setClearColor(_weatherFog, 1);
 
   /* --- 天空 / 海 / 车 / 风景 --- */
+  sky.setWeather(ws);
+  sky.setFlash(ws.flash);
   sky.update(elapsed, sunDir, moonDir, palette.night);
   water.update(dt, elapsed, lightDir, palette.night);
 
@@ -569,6 +609,7 @@ function animate() {
   }
 
   updateClock(elev, virtualHour);
+  updateWeatherHud();
   gradePass.uniforms.uTime.value = elapsed;
 
   /* --- 反射 & 渲染 --- */
@@ -594,6 +635,10 @@ window.__sea = {
   restartIntro: () => { elapsed = 0.15; },
   setIntroTime: (t) => { elapsed = t; },
   getElapsed: () => elapsed,
+  weather: weather,
+  forceStorm: (sec = 30) => weather.forceStorm(sec),
+  strikeLightning: () => weather.strike(),
+  refreshWeather: () => weather.refresh(),
   lowfx: () => {
     renderer.shadowMap.enabled = false;
     water.renderReflection = () => {};
