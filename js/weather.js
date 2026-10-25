@@ -210,12 +210,28 @@ export function createWeather(scene, camera) {
     return clamp(state.intensity, 0, 1) * 0.07;
   }
 
-  function updateRainAudio() {
+  /* 雨声参数不用每帧写：setTargetAtTime 每次都会往 AudioParam 时间线上塞一个事件，
+     每帧调用既费 CPU，事件还会一直堆。这里节流到 5Hz，并且值没明显变化就不写。 */
+  let audioAccum = 0;
+  let lastGainTarget = -1;
+  let lastFilterFreq = -1;
+  function updateRainAudio(dt) {
     if (!audioCtx || !rainGain) return;
+    audioAccum += dt;
+    if (audioAccum < 0.2) return;
+    audioAccum = 0;
+
     const target = soundEnabled ? rainGainTarget() : 0;
-    rainGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.6);
+    if (Math.abs(target - lastGainTarget) > 0.0005) {
+      lastGainTarget = target;
+      rainGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.6);
+    }
     if (rainFilter) {
-      rainFilter.frequency.setTargetAtTime(1800 + state.intensity * 3600, audioCtx.currentTime, 1.0);
+      const freq = 1800 + state.intensity * 3600;
+      if (Math.abs(freq - lastFilterFreq) > 20) {
+        lastFilterFreq = freq;
+        rainFilter.frequency.setTargetAtTime(freq, audioCtx.currentTime, 1.0);
+      }
     }
   }
 
@@ -406,7 +422,7 @@ export function createWeather(scene, camera) {
       bolt.visible = false;
     }
 
-    updateRainAudio();
+    updateRainAudio(dt);
   }
 
   return {

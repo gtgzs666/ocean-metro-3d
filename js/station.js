@@ -80,6 +80,27 @@ export function createStationSystem(scene) {
   const geoUmb = new THREE.ConeGeometry(0.82, 0.36, 14, 1, true);
   const geoUmbShaft = new THREE.CylinderGeometry(0.018, 0.018, 0.95, 6);
 
+  /* build() 里临时 new 出来的几何体，车站下线必须一起释放；
+     这几个是在模块级复用给所有车站的，不能动。 */
+  const sharedGeo = new Set([
+    geoDeck, geoColumn, geoPillar, geoRoof, geoFascia, geoLampShade,
+    geoBenchSeat, geoBenchBack, geoBenchLeg, geoCapsule, geoHead, geoUmb, geoUmbShaft,
+  ]);
+
+  function disposeStation(g) {
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      if (o.geometry && !sharedGeo.has(o.geometry)) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        /* 只回收“每站独有”的材质（名牌贴图、盲道色），共用材质不能碰 */
+        if (!m || !m.userData.perStation) continue;
+        if (m.map) m.map.dispose();
+        m.dispose();
+      }
+    });
+  }
+
   function build(nameInfo) {
     const g = new THREE.Group();
 
@@ -94,8 +115,9 @@ export function createStationSystem(scene) {
     edge.position.set(0, 1.29, -2.95);
     g.add(edge);
 
-    const tactile = new THREE.Mesh(new THREE.BoxGeometry(58, 0.045, 0.42),
-      toon({ color: 0xa5852f }));
+    const matTactile = toon({ color: 0xa5852f });
+    matTactile.userData.perStation = true;
+    const tactile = new THREE.Mesh(new THREE.BoxGeometry(58, 0.045, 0.42), matTactile);
     tactile.position.set(0, 1.29, -3.62);
     g.add(tactile);
 
@@ -164,6 +186,7 @@ export function createStationSystem(scene) {
     const signMat = toon({
       map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.55,
     });
+    signMat.userData.perStation = true;
     const frame = new THREE.Mesh(new THREE.BoxGeometry(8.9, 2.42, 0.1), matDark);
     frame.position.set(0, 5.08, -2.6);
     addOutline(frame, 0.03);
@@ -286,11 +309,7 @@ export function createStationSystem(scene) {
 
       if (x < -360) {
         scene.remove(s);
-        s.traverse(o => {
-          if (o.isMesh && o.material && o.material.map && o.material.map.isCanvasTexture) {
-            o.material.map.dispose();
-          }
-        });
+        disposeStation(s);
         stations.splice(i, 1);
       }
     }

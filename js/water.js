@@ -183,6 +183,8 @@ void main() {
 
 export function createWater(renderer, scene, camera) {
   /* 非线性网格：近处密、远处疏，一张平面铺到海平线 */
+  /* 620² = 38 万顶点，每顶点 15 次 sin，是集显上最重的一块。
+     卡的话先降到 400（约 16 万顶点），近处波形几乎看不出差别。 */
   const SEG = 620;
   const EXTENT = 4500;
   const geo = new THREE.PlaneGeometry(2, 2, SEG, SEG);
@@ -229,10 +231,14 @@ export function createWater(renderer, scene, camera) {
   scene.add(mesh);
 
   /* ---------- 平面前面反射 ---------- */
+  /* 反射要整场景再渲一遍，像素成本跟这张 RT 直接成正比。
+     反射本身已经做了 5 点模糊 + 波纹扰动 + 降饱和，0.55 倍分辨率肉眼几乎看不出，
+     想更清楚就调高 REFLECT_SCALE（0.9 是原来的值，最贵）。 */
+  const REFLECT_SCALE = 0.55;
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   const rt = new THREE.WebGLRenderTarget(
-    Math.max(2, Math.floor(size.x * 0.9)),
-    Math.max(2, Math.floor(size.y * 0.9)),
+    Math.max(2, Math.floor(size.x * REFLECT_SCALE)),
+    Math.max(2, Math.floor(size.y * REFLECT_SCALE)),
     {
       type: THREE.HalfFloatType,
       minFilter: THREE.LinearFilter,
@@ -310,7 +316,8 @@ export function createWater(renderer, scene, camera) {
     if (!updateReflectionCamera()) return;
     const prev = renderer.getRenderTarget();
     mesh.visible = false;
-    renderer.shadowMap.needsUpdate = true;
+    /* 阴影贴图由主循环按 SHADOW_EVERY 统一驱动，这里不要再强制刷新，
+       否则反射每渲一次就重算一遍 2048² 阴影。 */
     renderer.setRenderTarget(rt);
     renderer.clear();
     renderer.render(scene, virtualCamera);
@@ -340,8 +347,8 @@ export function createWater(renderer, scene, camera) {
     const s = renderer.getDrawingBufferSize(new THREE.Vector2());
     uniforms.uResolution.value.copy(s);
     rt.setSize(
-      Math.max(2, Math.floor(s.x * 0.9)),
-      Math.max(2, Math.floor(s.y * 0.9))
+      Math.max(2, Math.floor(s.x * REFLECT_SCALE)),
+      Math.max(2, Math.floor(s.y * REFLECT_SCALE))
     );
   }
 

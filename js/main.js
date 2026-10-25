@@ -28,9 +28,11 @@ document.body.insertBefore(canvas, document.body.firstChild);
 
 let renderer;
 try {
+  /* 场景已经由 composer 的 4x MSAA 渲染目标抗锯齿，
+     默认 framebuffer 再开 MSAA 只是白付显存和带宽，关掉。 */
   renderer = new THREE.WebGLRenderer({
     canvas,
-    antialias: true,
+    antialias: false,
     powerPreference: 'high-performance',
     stencil: false,
   });
@@ -113,6 +115,7 @@ fillLight.position.set(26, 14, 40);
 scene.add(fillLight);
 
 const moonColor = new THREE.Color(0x9db8e8);
+const _white = new THREE.Color(0xffffff);
 
 /* ============================================================
    后期：泛光 + 暗角 + 轻微锐化 + 纸颗粒
@@ -283,6 +286,11 @@ function onStationEvent(type, info) {
    主循环
    ============================================================ */
 const clock = new THREE.Clock();
+/* 隔帧更新：日光每帧只挪一点点，阴影和反射都不必每帧重算。
+   2 = 每两帧更新一次（省一半开销），想更顺就改回 1（每帧，最贵）。 */
+const SHADOW_EVERY = 2;
+const REFLECT_EVERY = 2;
+let fxFrame = 0;
 const sunDir = new THREE.Vector3();
 const moonDir = new THREE.Vector3();
 const lightDir = new THREE.Vector3();
@@ -547,7 +555,7 @@ function animate() {
 
   hemi.color.copy(palette.hor);
   hemi.intensity = 0.24 + (1 - palette.night) * 0.5;
-  fillLight.color.copy(palette.hor).lerp(new THREE.Color(0xffffff), 0.3);
+  fillLight.color.copy(palette.hor).lerp(_white, 0.3);
   fillLight.intensity = 0.08 + (1 - palette.night) * 0.3;
 
   /* --- 新加坡实时天气：压暗光照、压能见度、雾霾色 --- */
@@ -613,9 +621,10 @@ function animate() {
   updateWeatherHud();
   gradePass.uniforms.uTime.value = elapsed;
 
-  /* --- 反射 & 渲染 --- */
-  renderer.shadowMap.needsUpdate = true;
-  water.renderReflection();
+  /* --- 阴影 / 反射 / 渲染 --- */
+  if (fxFrame % SHADOW_EVERY === 0) renderer.shadowMap.needsUpdate = true;
+  if (fxFrame % REFLECT_EVERY === 0) water.renderReflection();
+  fxFrame++;
   composer.render();
 
   if (firstFrame) {
